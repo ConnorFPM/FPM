@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Memphis Real Estate Heatmap</title>
+  <style>
+    /* Basic CSS layout for the sidebar and map */
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+    }
+    #container {
+      display: flex;
+      height: 100%;
+    }
+    #sidebar {
+      width: 220px;
+      padding: 10px;
+      background-color: #ffffff;
+      border-right: 4px solid #808080;
+      overflow-y: auto;
+    }
+    #sidebar h3 {
+      margin-top: 0;
+    }
+    #sidebar button {
+      margin-top: 10px;
+      padding: 8px 12px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    #map {
+      flex: 1;
+    }
+  </style>
+  <script>
+    // Global configuration variables for the heatmap visualization.
+    var heatmapRadius = 70;      // Radius of each heat point.
+    var heatmapOpacity = 0.5;      // Opacity of the heatmap layer.
+    var heatmapMaxIntensity = 100; // (Optional) Maximum intensity for scaling.
+
+    // Global styling variables for zip code polygons and labels.
+    var zipStrokeColor = 'rgba(0, 0, 0, 0.5)';
+    var zipStrokeWeight = 3;
+    var zipFillOpacity = 0;
+    var zipLabelFontSize = '20px';
+    var zipLabelColor = '#000c78';
+
+    // Default center and zoom level for the map.
+    var defaultCenter = { lat: 35.132501, lng: -89.969221 };
+    var defaultZoom = 12;
+
+    // Global variables for the map and layers.
+    var map;
+    var heatmapLayer1;  // Heatmap layer for CSV data.
+    var zipLayer;       // Data layer for zip code polygons.
+    // Store markers for zip code labels (to toggle them easily).
+    var zipLabelMarkers = [];
+
+    /**
+     * Loads CSV data from a local file.
+     * Expects each line to be: latitude,longitude,weight
+     */
+    function loadCSVData(fileName, callback) {
+      fetch(fileName)
+        .then(function(response) {
+          if (!response.ok) {
+            throw new Error("Network response was not ok");
+          }
+          return response.text();
+        })
+        .then(function(text) {
+          var lines = text.split(/\r?\n/);
+          var data = [];
+          lines.forEach(function(line) {
+            if (line.trim() === "") return;
+            var parts = line.split(",");
+            if (parts.length < 3) return;
+            var lat = parseFloat(parts[0]);
+            var lng = parseFloat(parts[1]);
+            var weight = parseFloat(parts[2]);
+            if (!isNaN(lat) && !isNaN(lng) && !isNaN(weight)) {
+              data.push({
+                location: new google.maps.LatLng(lat, lng),
+                weight: weight
+              });
+            }
+          });
+          callback(data);
+        })
+        .catch(function(error) {
+          console.error("Error loading CSV data from " + fileName + ":", error);
+        });
+    }
+
+    /**
+     * Toggles the visibility of a map layer.
+     */
+    function toggleLayer(visible, layerSetter) {
+      // layerSetter is a function that sets the layer's map.
+      layerSetter(visible ? map : null);
+    }
+
+    /**
+     * Initializes the Google Map, heatmap layer, and zip code polygon layer.
+     */
+    function initMap() {
+      // Center the map on Memphis, Tennessee.
+      map = new google.maps.Map(document.getElementById('map'), {
+        zoom: defaultZoom,
+        center: defaultCenter,
+        mapTypeId: 'roadmap'
+      });
+
+      // --- Heatmap (Layer 1) ---
+      // Load CSV data for Layer 1 and create its heatmap layer.
+      loadCSVData('Layer1.csv', function(data) {
+        heatmapLayer1 = new google.maps.visualization.HeatmapLayer({
+          data: data,
+          radius: heatmapRadius,
+          opacity: heatmapOpacity
+          // Optionally, include maxIntensity:
+          // maxIntensity: heatmapMaxIntensity
+        });
+        heatmapLayer1.setMap(map);
+      });
+
+      // --- Zip Code Boundaries (Layer 2) ---
+      // Create a Data layer to load GeoJSON polygons.
+      zipLayer = new google.maps.Data();
+      zipLayer.loadGeoJson('zipcodes.geojson', null, function(features) {
+        // Style the polygons.
+        zipLayer.setStyle({
+          fillOpacity: zipFillOpacity,
+          strokeColor: zipStrokeColor,
+          strokeWeight: zipStrokeWeight
+        });
+        zipLayer.setMap(map);
+
+        // For each feature, compute the centroid to place a label.
+        features.forEach(function(feature) {
+          var bounds = new google.maps.LatLngBounds();
+          // Extend bounds for each LatLng in the polygon (or multipolygon).
+          feature.getGeometry().forEachLatLng(function(latlng) {
+            bounds.extend(latlng);
+          });
+          var center = bounds.getCenter();
+          // Get the label text (assuming property "ZCTA5CE10" holds the zip code).
+          var labelText = feature.getProperty('ZCTA5CE10') || '';
+          // Create a marker with a label (using a transparent icon so only the label shows).
+          var marker = new google.maps.Marker({
+            position: center,
+            map: map,
+            label: {
+              text: labelText,
+              color: zipLabelColor,
+              fontSize: zipLabelFontSize,
+              fontWeight: 'bold'
+            },
+            icon: {
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: 0 // Hide the marker's icon.
+            }
+          });
+          zipLabelMarkers.push(marker);
+        });
+      });
+
+      // --- Layer Toggle Controls ---
+      // Toggle Heatmap (Layer 1).
+      document.getElementById('layer1').addEventListener('change', function() {
+        if (heatmapLayer1) {
+          heatmapLayer1.setMap(this.checked ? map : null);
+        }
+      });
+
+      // Toggle Zip Code Layer (Layer 2: both polygons and labels).
+      document.getElementById('layer2').addEventListener('change', function() {
+        var visible = this.checked;
+        zipLayer.setMap(visible ? map : null);
+        zipLabelMarkers.forEach(function(marker) {
+          marker.setMap(visible ? map : null);
+        });
+      });
+
+      // --- Reset Map Button ---
+      document.getElementById('resetButton').addEventListener('click', function() {
+        map.setCenter(defaultCenter);
+        map.setZoom(defaultZoom);
+      });
+    }
+  </script>
+</head>
+<body>
+  <div id="container">
+    <div id="sidebar">
+      <h3>Layers</h3>
+      <label>
+        <input type="checkbox" id="layer1" checked> Heatmap
+      </label>
+      <br><br>
+      <label>
+        <input type="checkbox" id="layer2" checked> Zip Codes
+      </label>
+      <br><br>
+      <button id="resetButton">Reset Zoom and Position</button>
+    </div>
+    <div id="map"></div>
+  </div>
+  <!-- Load the Google Maps API with visualization and geometry libraries -->
+  <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDZgzOo3O7VSk216fyjFscgPJftzlaGjDY&libraries=visualization,geometry&callback=initMap"></script>
+</body>
+</html>
