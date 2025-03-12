@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Memphis Real Estate Heatmap</title>
+    <style>
+      /* Basic CSS layout for the sidebar and map */
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        font-family: Arial, sans-serif;
+      }
+      #container {
+        display: flex;
+        height: 100%;
+      }
+      #sidebar {
+        width: 220px;
+        padding: 10px;
+        background-color: #ffffff;
+        border-right: 4px solid #808080;
+        overflow-y: auto;
+      }
+      #sidebar h3 {
+        margin-top: 0;
+      }
+      #sidebar button {
+        margin-top: 10px;
+        padding: 8px 12px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      /* Legend styles */
+      #legend {
+        margin-top: 20px;
+        padding-top: 10px;
+        border-top: 1px solid #ccc;
+      }
+      .legend-section {
+        margin-bottom: 10px;
+      }
+      .legend-bar {
+        height: 20px;
+        margin: 5px 0;
+      }
+      .legend-labels {
+        font-size: 12px;
+        display: flex;
+        justify-content: space-between;
+      }
+      #map {
+        flex: 1;
+      }
+    </style>
+    <!-- Include heatmap.js library (and its Google Maps integration if required) -->
+    <script src="heatmap.js"></script>
+    <script>
+      // Global configuration variables for the heatmap visualization.
+      var heatmapRadius = 70; // Radius for Days on Market heatmap.
+      var heatmapOpacity = 0.5; // Opacity for Days on Market heatmap.
+      var heatmapRadius2 = 4; // Radius for Crime heatmap.
+      var heatmapOpacity2 = 0.5; // Opacity for Crime heatmap.
+      var heatmapMaxIntensity = 100; // Maximum intensity for scaling.
+
+      // Global styling variables for zip code polygons and labels.
+      var zipStrokeColor = "rgba(0, 0, 0, 0.5)";
+      var zipStrokeWeight = 3;
+      var zipFillOpacity = 0;
+      var zipLabelFontSize = "20px";
+      var zipLabelColor = "#000c78";
+
+      // Default center and zoom level for the map.
+      var defaultCenter = { lat: 35.132501, lng: -89.969221 };
+      var defaultZoom = 12;
+
+      // Global variables for the map and layers.
+      var map;
+      var heatmapOverlay1; // Heatmap overlay for Days on Market.
+      var heatmapOverlay2; // Heatmap overlay for Crimes.
+      var zipLayer; // Data layer for zip code polygons.
+      // Store markers for zip code labels.
+      var zipLabelMarkers = [];
+
+      /**
+       * Loads CSV data from a local file.
+       * Expects each line to be: latitude,longitude,weight
+       * Converts each line into an object with lat, lng, and count properties.
+       */
+      function loadCSVData(fileName, callback) {
+        fetch(fileName)
+          .then(function (response) {
+            if (!response.ok) {
+              throw new Error("Network response was not ok");
+            }
+            return response.text();
+          })
+          .then(function (text) {
+            var lines = text.split(/\r?\n/);
+            var data = [];
+            lines.forEach(function (line) {
+              if (line.trim() === "") return;
+              var parts = line.split(",");
+              if (parts.length < 3) return;
+              var lat = parseFloat(parts[0]);
+              var lng = parseFloat(parts[1]);
+              var weight = parseFloat(parts[2]);
+              if (!isNaN(lat) && !isNaN(lng) && !isNaN(weight)) {
+                data.push({
+                  lat: lat,
+                  lng: lng,
+                  count: weight
+                });
+              }
+            });
+            callback(data);
+          })
+          .catch(function (error) {
+            console.error("Error loading CSV data from " + fileName + ":", error);
+          });
+      }
+
+      /**
+       * Initializes the Google Map, heatmap overlays, and zip code polygon layer.
+       */
+      function initMap() {
+        // Center the map on Memphis, Tennessee.
+        map = new google.maps.Map(document.getElementById("map"), {
+          zoom: defaultZoom,
+          center: defaultCenter,
+          mapTypeId: "roadmap"
+        });
+
+        // --- Initialize Heatmap Overlay for Days on Market ---
+        heatmapOverlay1 = new HeatmapOverlay(map, {
+          radius: heatmapRadius,
+          maxOpacity: heatmapOpacity,
+          scaleRadius: true,
+          useLocalExtrema: false,
+          latField: 'lat',
+          lngField: 'lng',
+          valueField: 'count'
+        });
+        loadCSVData("Layer1.csv", function (data) {
+          heatmapOverlay1.setData({
+            max: heatmapMaxIntensity,
+            data: data
+          });
+        });
+
+        // --- Initialize Heatmap Overlay for Crimes ---
+        var blueGradient = {
+          0: "rgba(173,216,230,0)",
+          0.25: "rgba(173,216,230,0.2)",
+          0.5: "rgba(135,206,235,0.4)",
+          0.75: "rgba(70,130,180,0.6)",
+          1: "rgba(0,0,139,0.8)"
+        };
+        heatmapOverlay2 = new HeatmapOverlay(map, {
+          radius: heatmapRadius2,
+          maxOpacity: heatmapOpacity2,
+          scaleRadius: true,
+          useLocalExtrema: false,
+          gradient: blueGradient,
+          latField: 'lat',
+          lngField: 'lng',
+          valueField: 'count'
+        });
+        loadCSVData("Layer2.csv", function (data) {
+          heatmapOverlay2.setData({
+            max: heatmapMaxIntensity,
+            data: data
+          });
+        });
+
+        // --- Zip Code Boundaries (GeoJSON) ---
+        zipLayer = new google.maps.Data();
+        zipLayer.loadGeoJson("zipcodes.geojson", null, function (features) {
+          // Style the polygons.
+          zipLayer.setStyle({
+            fillOpacity: zipFillOpacity,
+            strokeColor: zipStrokeColor,
+            strokeWeight: zipStrokeWeight
+          });
+          zipLayer.setMap(map);
+
+          // Place zip code labels.
+          features.forEach(function (feature) {
+            var bounds = new google.maps.LatLngBounds();
+            feature.getGeometry().forEachLatLng(function (latlng) {
+              bounds.extend(latlng);
+            });
+            var center = bounds.getCenter();
+            var labelText = feature.getProperty("ZCTA5CE10") || "";
+            var marker = new google.maps.Marker({
+              position: center,
+              map: map,
+              label: {
+                text: labelText,
+                color: zipLabelColor,
+                fontSize: zipLabelFontSize,
+                fontWeight: "bold"
+              },
+              icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: 0
+              }
+            });
+            zipLabelMarkers.push(marker);
+          });
+        });
+
+        // --- Layer Toggle Controls ---
+        // Toggle Days on Market Heatmap.
+        document.getElementById("layer1").addEventListener("change", function () {
+          if (this.checked) {
+            heatmapOverlay1.setMap(map);
+          } else {
+            heatmapOverlay1.setMap(null);
+          }
+        });
+
+        // Toggle Crime Heatmap.
+        document.getElementById("layer3").addEventListener("change", function () {
+          if (this.checked) {
+            heatmapOverlay2.setMap(map);
+          } else {
+            heatmapOverlay2.setMap(null);
+          }
+        });
+
+        // Toggle Zip Code Layer.
+        document.getElementById("layer2").addEventListener("change", function () {
+          var visible = this.checked;
+          zipLayer.setMap(visible ? map : null);
+          zipLabelMarkers.forEach(function (marker) {
+            marker.setMap(visible ? map : null);
+          });
+        });
+
+        // --- Reset Map Button ---
+        document.getElementById("resetButton").addEventListener("click", function () {
+          map.setCenter(defaultCenter);
+          map.setZoom(defaultZoom);
+        });
+      }
+    </script>
+  </head>
+  <body>
+    <div id="container">
+      <div id="sidebar">
+        <h3>Layers</h3>
+        <label><input type="checkbox" id="layer1" checked /> Days on Market Heatmap</label>
+        <br /><br />
+        <label><input type="checkbox" id="layer3" checked /> Crime Heatmap</label>
+        <br /><br />
+        <label><input type="checkbox" id="layer2" checked /> Zip Codes</label>
+        <br /><br />
+        <button id="resetButton">Reset Zoom and Position</button>
+        <!-- Legend for the heatmaps -->
+        <div id="legend">
+          <h4>Legend</h4>
+          <div class="legend-section">
+            <strong>Days on Market</strong>
+            <div class="legend-bar">
+              <div class="gradient-bar" style="background: linear-gradient(to right, lightyellow, orange, red); height: 100%"></div>
+            </div>
+            <div class="legend-labels">
+              <span>Shorter</span>
+              <span>Longer</span>
+            </div>
+          </div>
+          <div class="legend-section">
+            <strong>Crimes (Last 6 Years)</strong>
+            <div class="legend-bar">
+              <div class="gradient-bar" style="background: linear-gradient(to right, #add8e6, #00008b); height: 100%"></div>
+            </div>
+            <div class="legend-labels">
+              <span>Fewer</span>
+              <span>More</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="map"></div>
+    </div>
+    <!-- Load the Google Maps API -->
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDZgzOo3O7VSk216fyjFscgPJftzlaGjDY&libraries=geometry&callback=initMap"></script>
+  </body>
+</html>

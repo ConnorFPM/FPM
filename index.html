@@ -1,215 +1,300 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Memphis Real Estate Heatmap</title>
-  <style>
-    /* Basic CSS layout for the sidebar and map */
-    html, body {
-      height: 100%;
-      margin: 0;
-      padding: 0;
-      font-family: Arial, sans-serif;
-    }
-    #container {
-      display: flex;
-      height: 100%;
-    }
-    #sidebar {
-      width: 220px;
-      padding: 10px;
-      background-color: #ffffff;
-      border-right: 4px solid #808080;
-      overflow-y: auto;
-    }
-    #sidebar h3 {
-      margin-top: 0;
-    }
-    #sidebar button {
-      margin-top: 10px;
-      padding: 8px 12px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-    #map {
-      flex: 1;
-    }
-  </style>
-  <script>
-    // Global configuration variables for the heatmap visualization.
-    var heatmapRadius = 70;      // Radius of each heat point.
-    var heatmapOpacity = 0.5;      // Opacity of the heatmap layer.
-    var heatmapMaxIntensity = 100; // (Optional) Maximum intensity for scaling.
+  <head>
+    <meta charset="utf-8" />
+    <title>Memphis Real Estate Heatmap</title>
+    <style>
+      /* Basic CSS layout for the sidebar and map */
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        font-family: Arial, sans-serif;
+      }
+      #container {
+        display: flex;
+        height: 100%;
+      }
+      #sidebar {
+        width: 220px;
+        padding: 10px;
+        background-color: #ffffff;
+        border-right: 4px solid #808080;
+        overflow-y: auto;
+      }
+      #sidebar h3 {
+        margin-top: 0;
+      }
+      #sidebar button {
+        margin-top: 10px;
+        padding: 8px 12px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      /* Legend styles */
+      #legend {
+        margin-top: 20px;
+        padding-top: 10px;
+        border-top: 1px solid #ccc;
+      }
+      .legend-section {
+        margin-bottom: 10px;
+      }
+      .legend-bar {
+        height: 20px;
+        margin: 5px 0;
+      }
+      .legend-labels {
+        font-size: 12px;
+        display: flex;
+        justify-content: space-between;
+      }
+      #map {
+        flex: 1;
+      }
+    </style>
+    <script>
+      // Global configuration variables for the heatmap visualization.
+      var heatmapRadius = 90; // Radius of each heat point.
+      var heatmapOpacity = 0.6; // Opacity of the heatmap layer.
+      var heatmapRadius2 = 60; // Radius of each heat point.
+      var heatmapOpacity2 = 0.6; // Opacity of the heatmap layer.
+      var heatmapMaxIntensity = 500; // (Optional) Maximum intensity for scaling.
+      var heatmapMaxIntensity2 = 3000;
 
-    // Global styling variables for zip code polygons and labels.
-    var zipStrokeColor = 'rgba(0, 0, 0, 0.5)';
-    var zipStrokeWeight = 3;
-    var zipFillOpacity = 0;
-    var zipLabelFontSize = '20px';
-    var zipLabelColor = '#000c78';
+      // Global styling variables for zip code polygons and labels.
+      var zipStrokeColor = "rgba(0, 0, 0, 0.5)";
+      var zipStrokeWeight = 3;
+      var zipFillOpacity = 0;
+      var zipLabelFontSize = "20px";
+      var zipLabelColor = "#000c78";
 
-    // Default center and zoom level for the map.
-    var defaultCenter = { lat: 35.132501, lng: -89.969221 };
-    var defaultZoom = 12;
+      // Default center and zoom level for the map.
+      var defaultCenter = { lat: 35.132501, lng: -89.969221 };
+      var defaultZoom = 12;
 
-    // Global variables for the map and layers.
-    var map;
-    var heatmapLayer1;  // Heatmap layer for CSV data.
-    var zipLayer;       // Data layer for zip code polygons.
-    // Store markers for zip code labels (to toggle them easily).
-    var zipLabelMarkers = [];
+      // Global variables for the map and layers.
+      var map;
+      var heatmapLayer1; // Heatmap layer for CSV data (Days on Market).
+      var heatmapLayer2; // Heatmap layer for CSV data (Crimes).
+      var zipLayer; // Data layer for zip code polygons.
+      // Store markers for zip code labels (to toggle them easily).
+      var zipLabelMarkers = [];
 
-    /**
-     * Loads CSV data from a local file.
-     * Expects each line to be: latitude,longitude,weight
-     */
-    function loadCSVData(fileName, callback) {
-      fetch(fileName)
-        .then(function(response) {
-          if (!response.ok) {
-            throw new Error("Network response was not ok");
+      /**
+       * Loads CSV data from a local file.
+       * Expects each line to be: latitude,longitude,weight
+       */
+      function loadCSVData(fileName, callback) {
+        fetch(fileName)
+          .then(function (response) {
+            if (!response.ok) {
+              throw new Error("Network response was not ok");
+            }
+            return response.text();
+          })
+          .then(function (text) {
+            var lines = text.split(/\r?\n/);
+            var data = [];
+            lines.forEach(function (line) {
+              if (line.trim() === "") return;
+              var parts = line.split(",");
+              if (parts.length < 3) return;
+              var lat = parseFloat(parts[0]);
+              var lng = parseFloat(parts[1]);
+              var weight = parseFloat(parts[2]);
+              if (!isNaN(lat) && !isNaN(lng) && !isNaN(weight)) {
+                data.push({
+                  location: new google.maps.LatLng(lat, lng),
+                  weight: weight
+                });
+              }
+            });
+            callback(data);
+          })
+          .catch(function (error) {
+            console.error("Error loading CSV data from " + fileName + ":", error);
+          });
+      }
+
+      /**
+       * Initializes the Google Map, heatmap layers, and zip code polygon layer.
+       */
+      function initMap() {
+        // Center the map on Memphis, Tennessee.
+        map = new google.maps.Map(document.getElementById("map"), {
+          zoom: defaultZoom,
+          center: defaultCenter,
+          mapTypeId: "roadmap"
+        });
+
+        var DomGradient = ["rgba(191, 255, 186, 0)", "rgba(255, 189, 0, 1)", "rgba(192, 0, 0, 1)"];
+
+        // --- Heatmap for Days on Market (Layer1.csv) ---
+        loadCSVData("Layer1.csv", function (data) {
+          heatmapLayer1 = new google.maps.visualization.HeatmapLayer({
+            data: data,
+            radius: heatmapRadius,
+            opacity: heatmapOpacity,
+            maxIntensity: heatmapMaxIntensity
+          });
+          heatmapLayer1.setMap(map);
+        });
+
+        // --- Heatmap for Crimes (Layer2.csv) ---
+        // Define a gradient of progressively darker shades of blue.
+        var blueGradient = ["rgba(255,255,255,0)", "rgba(173,216,230,1)", "rgba(0,0,139,1)"];
+        loadCSVData("Layer2.csv", function (data) {
+          heatmapLayer2 = new google.maps.visualization.HeatmapLayer({
+            data: data,
+            radius: heatmapRadius2,
+            opacity: heatmapOpacity2,
+            gradient: blueGradient,
+            maxIntensity: heatmapMaxIntensity2
+          });
+          // Note: Crime layer is not enabled by default.
+        });
+
+        // --- Zip Code Boundaries (GeoJSON) ---
+        zipLayer = new google.maps.Data();
+        zipLayer.loadGeoJson("zipcodes.geojson", null, function (features) {
+          // Style the polygons.
+          zipLayer.setStyle({
+            fillOpacity: zipFillOpacity,
+            strokeColor: zipStrokeColor,
+            strokeWeight: zipStrokeWeight
+          });
+          zipLayer.setMap(map);
+
+          // For each feature, compute the centroid to place a label.
+          features.forEach(function (feature) {
+            var bounds = new google.maps.LatLngBounds();
+            feature.getGeometry().forEachLatLng(function (latlng) {
+              bounds.extend(latlng);
+            });
+            var center = bounds.getCenter();
+            var labelText = feature.getProperty("ZCTA5CE10") || "";
+            var marker = new google.maps.Marker({
+              position: center,
+              map: map,
+              label: {
+                text: labelText,
+                color: zipLabelColor,
+                fontSize: zipLabelFontSize,
+                fontWeight: "bold"
+              },
+              icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: 0
+              }
+            });
+            zipLabelMarkers.push(marker);
+          });
+        });
+
+        // --- Layer Toggle Controls ---
+
+        // Toggle Days on Market Heatmap (Layer1.csv).
+        document.getElementById("layer1").addEventListener("change", function () {
+          if (this.checked) {
+            // Disable Crime Heatmap if it's enabled.
+            document.getElementById("layer3").checked = false;
+            if (heatmapLayer2) {
+              heatmapLayer2.setMap(null);
+            }
           }
-          return response.text();
-        })
-        .then(function(text) {
-          var lines = text.split(/\r?\n/);
-          var data = [];
-          lines.forEach(function(line) {
-            if (line.trim() === "") return;
-            var parts = line.split(",");
-            if (parts.length < 3) return;
-            var lat = parseFloat(parts[0]);
-            var lng = parseFloat(parts[1]);
-            var weight = parseFloat(parts[2]);
-            if (!isNaN(lat) && !isNaN(lng) && !isNaN(weight)) {
-              data.push({
-                location: new google.maps.LatLng(lat, lng),
-                weight: weight
-              });
+          if (heatmapLayer1) {
+            heatmapLayer1.setMap(this.checked ? map : null);
+          }
+        });
+
+        // Toggle Crime Heatmap (Layer2.csv).
+        document.getElementById("layer3").addEventListener("change", function () {
+          if (this.checked) {
+            // Disable Days on Market Heatmap if it's enabled.
+            document.getElementById("layer1").checked = false;
+            if (heatmapLayer1) {
+              heatmapLayer1.setMap(null);
             }
+          }
+          if (heatmapLayer2) {
+            heatmapLayer2.setMap(this.checked ? map : null);
+          }
+        });
+
+        // Toggle Zip Code Layer (polygons and labels).
+        document.getElementById("layer2").addEventListener("change", function () {
+          var visible = this.checked;
+          zipLayer.setMap(visible ? map : null);
+          zipLabelMarkers.forEach(function (marker) {
+            marker.setMap(visible ? map : null);
           });
-          callback(data);
-        })
-        .catch(function(error) {
-          console.error("Error loading CSV data from " + fileName + ":", error);
         });
-    }
 
-    /**
-     * Toggles the visibility of a map layer.
-     */
-    function toggleLayer(visible, layerSetter) {
-      // layerSetter is a function that sets the layer's map.
-      layerSetter(visible ? map : null);
-    }
-
-    /**
-     * Initializes the Google Map, heatmap layer, and zip code polygon layer.
-     */
-    function initMap() {
-      // Center the map on Memphis, Tennessee.
-      map = new google.maps.Map(document.getElementById('map'), {
-        zoom: defaultZoom,
-        center: defaultCenter,
-        mapTypeId: 'roadmap'
-      });
-
-      // --- Heatmap (Layer 1) ---
-      // Load CSV data for Layer 1 and create its heatmap layer.
-      loadCSVData('Layer1.csv', function(data) {
-        heatmapLayer1 = new google.maps.visualization.HeatmapLayer({
-          data: data,
-          radius: heatmapRadius,
-          opacity: heatmapOpacity
-          // Optionally, include maxIntensity:
-          // maxIntensity: heatmapMaxIntensity
+        // --- Reset Map Button ---
+        document.getElementById("resetButton").addEventListener("click", function () {
+          map.setCenter(defaultCenter);
+          map.setZoom(defaultZoom);
         });
-        heatmapLayer1.setMap(map);
-      });
-
-      // --- Zip Code Boundaries (Layer 2) ---
-      // Create a Data layer to load GeoJSON polygons.
-      zipLayer = new google.maps.Data();
-      zipLayer.loadGeoJson('zipcodes.geojson', null, function(features) {
-        // Style the polygons.
-        zipLayer.setStyle({
-          fillOpacity: zipFillOpacity,
-          strokeColor: zipStrokeColor,
-          strokeWeight: zipStrokeWeight
-        });
-        zipLayer.setMap(map);
-
-        // For each feature, compute the centroid to place a label.
-        features.forEach(function(feature) {
-          var bounds = new google.maps.LatLngBounds();
-          // Extend bounds for each LatLng in the polygon (or multipolygon).
-          feature.getGeometry().forEachLatLng(function(latlng) {
-            bounds.extend(latlng);
-          });
-          var center = bounds.getCenter();
-          // Get the label text (assuming property "ZCTA5CE10" holds the zip code).
-          var labelText = feature.getProperty('ZCTA5CE10') || '';
-          // Create a marker with a label (using a transparent icon so only the label shows).
-          var marker = new google.maps.Marker({
-            position: center,
-            map: map,
-            label: {
-              text: labelText,
-              color: zipLabelColor,
-              fontSize: zipLabelFontSize,
-              fontWeight: 'bold'
-            },
-            icon: {
-              path: google.maps.SymbolPath.CIRCLE,
-              scale: 0 // Hide the marker's icon.
-            }
-          });
-          zipLabelMarkers.push(marker);
-        });
-      });
-
-      // --- Layer Toggle Controls ---
-      // Toggle Heatmap (Layer 1).
-      document.getElementById('layer1').addEventListener('change', function() {
-        if (heatmapLayer1) {
-          heatmapLayer1.setMap(this.checked ? map : null);
-        }
-      });
-
-      // Toggle Zip Code Layer (Layer 2: both polygons and labels).
-      document.getElementById('layer2').addEventListener('change', function() {
-        var visible = this.checked;
-        zipLayer.setMap(visible ? map : null);
-        zipLabelMarkers.forEach(function(marker) {
-          marker.setMap(visible ? map : null);
-        });
-      });
-
-      // --- Reset Map Button ---
-      document.getElementById('resetButton').addEventListener('click', function() {
-        map.setCenter(defaultCenter);
-        map.setZoom(defaultZoom);
-      });
-    }
-  </script>
-</head>
-<body>
-  <div id="container">
-    <div id="sidebar">
-      <h3>Layers</h3>
-      <label>
-        <input type="checkbox" id="layer1" checked> Heatmap
-      </label>
-      <br><br>
-      <label>
-        <input type="checkbox" id="layer2" checked> Zip Codes
-      </label>
-      <br><br>
-      <button id="resetButton">Reset Zoom and Position</button>
+      }
+    </script>
+  </head>
+  <body>
+    <div id="container">
+      <div id="sidebar">
+        <h3>Layers</h3>
+        <label> <input type="checkbox" id="layer1" checked /> Days on Market Heatmap </label>
+        <br /><br />
+        <label> <input type="checkbox" id="layer3" /> Crime Heatmap </label>
+        <br /><br />
+        <label> <input type="checkbox" id="layer2" checked /> Zip Codes </label>
+        <br /><br />
+        <button id="resetButton">Reset Zoom and Position</button>
+        <!-- Legend for the heatmaps -->
+        <div id="legend">
+          <h4>Legend</h4>
+          <div class="legend-section">
+            <strong>Days on Market</strong>
+            <div class="legend-bar">
+              <div
+                class="gradient-bar"
+                style="
+                  background: linear-gradient(
+                    to right,
+                    rgb(21, 201, 0),
+                    rgb(255, 236, 0),
+                    rgb(255, 177, 0),
+                    rgb(255, 0, 0)
+                  );
+                  height: 100%;
+                "></div>
+            </div>
+            <div class="legend-labels">
+              <span>0 DoM</span>
+              <span>300+ DoM</span>
+            </div>
+          </div>
+          <div class="legend-section">
+            <strong>Property Crimes (2014-Now)</strong>
+            <div class="legend-bar">
+              <div
+                class="gradient-bar"
+                style="background: linear-gradient(to right, #c0efff, #00008b); height: 100%"></div>
+            </div>
+            <div class="legend-labels">
+              <span>0</span>
+              <span>5000+</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="map"></div>
     </div>
-    <div id="map"></div>
-  </div>
-  <!-- Load the Google Maps API with visualization and geometry libraries -->
-  <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDZgzOo3O7VSk216fyjFscgPJftzlaGjDY&libraries=visualization,geometry&callback=initMap"></script>
-</body>
+    <!-- Load the Google Maps API with visualization and geometry libraries -->
+    <script
+      async
+      defer
+      src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDZgzOo3O7VSk216fyjFscgPJftzlaGjDY&libraries=visualization,geometry&callback=initMap"></script>
+  </body>
 </html>

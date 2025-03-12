@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Refined Data Layers Example</title>
+    <meta charset="utf-8" />
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        font-family: Arial, sans-serif;
+      }
+      #container {
+        display: flex;
+        height: 100%;
+      }
+      #sidebar {
+        width: 250px;
+        padding: 10px;
+        background: #fff;
+        border-right: 1px solid #ccc;
+      }
+      #map {
+        flex: 1;
+      }
+      h3 {
+        margin-top: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="container">
+      <div id="sidebar">
+        <h3>Layers</h3>
+        <label>
+          <input type="checkbox" id="eqLayer" checked>
+          Earthquake Data
+        </label>
+        <br><br>
+        <label>
+          <input type="checkbox" id="polyLayer" checked>
+          Bermuda Triangle Polygon
+        </label>
+      </div>
+      <div id="map"></div>
+    </div>
+
+    <script>
+      let map;
+      let polygon;
+      let eqData = null;   // Will store the raw earthquake JSON data
+      let eqFeatures = []; // Will store the features added to the Data layer
+
+      function initMap() {
+        // Create a map centered on a global view.
+        map = new google.maps.Map(document.getElementById("map"), {
+          center: { lat: 20, lng: -160 },
+          zoom: 2,
+          mapTypeId: "terrain"
+        });
+
+        // Create an InfoWindow for displaying earthquake details.
+        const infoWindow = new google.maps.InfoWindow({ pixelOffset: { height: -37 } });
+
+        // Add a click listener to the Data layer so that clicking on an earthquake shows info.
+        map.data.addListener("click", (e) => {
+          const feature = e.feature;
+          const content = `
+            <div style="padding:8px">
+              <h2>${feature.getProperty("place")}</h2>
+              <h3>Magnitude: ${feature.getProperty("mag")}</h3>
+              <p>${new Date(feature.getProperty("time"))}</p>
+              <a href="${feature.getProperty("url")}" target="_blank">More Info</a>
+            </div>
+          `;
+          infoWindow.setContent(content);
+          infoWindow.setPosition(e.latLng);
+          infoWindow.open(map);
+        });
+
+        // Load earthquake data via JSONP.
+        const script = document.createElement("script");
+        script.src = "https://storage.googleapis.com/mapsdevsite/json/quakes.geo.json";
+        document.head.appendChild(script);
+
+        // Create the Bermuda Triangle polygon.
+        const triangleCoords = [
+          { lat: 25.774, lng: -80.19 },
+          { lat: 18.466, lng: -66.118 },
+          { lat: 32.321, lng: -64.757 },
+          { lat: 25.774, lng: -80.19 }
+        ];
+        polygon = new google.maps.Polygon({
+          paths: triangleCoords,
+          strokeColor: "#FF0000",
+          strokeOpacity: 0.8,
+          strokeWeight: 2,
+          fillColor: "#FF0000",
+          fillOpacity: 0.35,
+          map: map
+        });
+
+        // Set up checkbox event listeners to toggle each layer.
+        document.getElementById("eqLayer").addEventListener("change", function() {
+          if (this.checked) {
+            // Re-add earthquake features if they were removed.
+            if (eqData && eqFeatures.length === 0) {
+              eqFeatures = map.data.addGeoJson(eqData);
+            }
+          } else {
+            // Remove earthquake features from the Data layer.
+            if (eqFeatures.length > 0) {
+              eqFeatures.forEach(feature => map.data.remove(feature));
+              eqFeatures = [];
+            }
+          }
+        });
+
+        document.getElementById("polyLayer").addEventListener("change", function() {
+          polygon.setMap(this.checked ? map : null);
+        });
+      }
+
+      // JSONP callback invoked by the earthquake data feed.
+      function eqfeed_callback(data) {
+        eqData = data; // Save the raw data for toggling
+        eqFeatures = map.data.addGeoJson(data);
+        // Optionally, style the earthquake features.
+        map.data.setStyle(feature => ({
+          title: feature.getProperty("place")
+        }));
+      }
+
+      // Expose the callback function to the global scope.
+      window.eqfeed_callback = eqfeed_callback;
+    </script>
+
+    <!-- Load the Google Maps API. Replace INSERT_YOUR_API_KEY with your actual API key. -->
+    <script async defer
+      src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDZgzOo3O7VSk216fyjFscgPJftzlaGjDY&callback=initMap&v=weekly&solution_channel=GMP_CCS_simplepolygon_v2">
+    </script>
+  </body>
+</html>
