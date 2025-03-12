@@ -57,9 +57,9 @@
     <script>
       // Global configuration variables for the heatmap visualization.
       var heatmapRadius = 90; // Radius of each heat point.
-      var heatmapOpacity = 0.6; // Opacity of the heatmap layer.
+      var heatmapOpacity = 0.5; // Opacity of the heatmap layer.
       var heatmapRadius2 = 60; // Radius of each heat point.
-      var heatmapOpacity2 = 0.6; // Opacity of the heatmap layer.
+      var heatmapOpacity2 = 0.65; // Opacity of the heatmap layer.
       var heatmapMaxIntensity = 500; // (Optional) Maximum intensity for scaling.
       var heatmapMaxIntensity2 = 3000;
 
@@ -81,6 +81,8 @@
       var zipLayer; // Data layer for zip code polygons.
       // Store markers for zip code labels (to toggle them easily).
       var zipLabelMarkers = [];
+      // Global temporary marker for search results.
+      var searchMarker = null;
 
       /**
        * Loads CSV data from a local file.
@@ -119,7 +121,8 @@
       }
 
       /**
-       * Initializes the Google Map, heatmap layers, and zip code polygon layer.
+       * Initializes the Google Map, heatmap layers, zip code polygon layer,
+       * and sets up the address search functionality.
        */
       function initMap() {
         // Center the map on Memphis, Tennessee.
@@ -127,6 +130,45 @@
           zoom: defaultZoom,
           center: defaultCenter,
           mapTypeId: "roadmap"
+        });
+
+        // Initialize the geocoder.
+        var geocoder = new google.maps.Geocoder();
+
+        // --- Address Search Functionality ---
+        document.getElementById("searchButton").addEventListener("click", function () {
+          var address = document.getElementById("address-input").value;
+          if (address) {
+            // If the address does not include "memphis" (case insensitive), assume Memphis, TN.
+            if (address.toLowerCase().indexOf("memphis") === -1) {
+              address = address + ", Memphis, TN";
+            }
+            geocoder.geocode({ address: address }, function (results, status) {
+              if (status === "OK") {
+                var location = results[0].geometry.location;
+                // Center the map on the found location without changing the zoom level.
+                map.setCenter(location);
+                // Remove the previous search marker if it exists.
+                if (searchMarker) {
+                  searchMarker.setMap(null);
+                }
+                // Place a new temporary marker at the location.
+                searchMarker = new google.maps.Marker({
+                  position: location,
+                  map: map,
+                  title: results[0].formatted_address
+                });
+              } else {
+                alert("Geocode was not successful for the following reason: " + status);
+              }
+            });
+          }
+        });
+        document.getElementById("address-input").addEventListener("keydown", function (event) {
+          if (event.key === "Enter") {
+            event.preventDefault(); // Prevent the default form submission behavior.
+            document.getElementById("searchButton").click();
+          }
         });
 
         var DomGradient = ["rgba(191, 255, 186, 0)", "rgba(255, 189, 0, 1)", "rgba(192, 0, 0, 1)"];
@@ -243,17 +285,38 @@
   <body>
     <div id="container">
       <div id="sidebar">
-        <h3>Layers</h3>
-        <label> <input type="checkbox" id="layer1" checked /> Days on Market Heatmap </label>
+        <!-- Address Search Box -->
+        <h3>Address Search</h3>
+        <div id="search-container">
+          <input
+            type="text"
+            id="address-input"
+            placeholder="Enter address"
+            style="width: 93%; margin-bottom: 0; padding: 5px" />
+          <button id="searchButton" style="width: 100%; padding: 8px 12px; font-size: 14px">Search</button>
+        </div>
+        <br />
+        <br />
+        <h3>Toggle Layer Visibility</h3>
+        <label>
+          <input type="checkbox" id="layer1" checked />
+          Days on Market Heatmap
+        </label>
         <br /><br />
-        <label> <input type="checkbox" id="layer3" /> Crime Heatmap </label>
+        <label>
+          <input type="checkbox" id="layer3" />
+          Crime Heatmap
+        </label>
         <br /><br />
-        <label> <input type="checkbox" id="layer2" checked /> Zip Codes </label>
+        <label>
+          <input type="checkbox" id="layer2" checked />
+          Zip Codes
+        </label>
         <br /><br />
         <button id="resetButton">Reset Zoom and Position</button>
         <!-- Legend for the heatmaps -->
         <div id="legend">
-          <h4>Legend</h4>
+          <h2>Legend</h2>
           <div class="legend-section">
             <strong>Days on Market</strong>
             <div class="legend-bar">
@@ -268,6 +331,7 @@
                     rgb(255, 0, 0)
                   );
                   height: 100%;
+                  border: 2px solid black;
                 "></div>
             </div>
             <div class="legend-labels">
@@ -280,11 +344,15 @@
             <div class="legend-bar">
               <div
                 class="gradient-bar"
-                style="background: linear-gradient(to right, #c0efff, #00008b); height: 100%"></div>
+                style="
+                  background: linear-gradient(to right, #ffffff, #c0efff, #00008b);
+                  height: 100%;
+                  border: 2px solid black;
+                "></div>
             </div>
             <div class="legend-labels">
               <span>0</span>
-              <span>5000+</span>
+              <span>3000+</span>
             </div>
           </div>
         </div>
